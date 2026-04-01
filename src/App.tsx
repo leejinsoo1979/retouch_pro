@@ -300,21 +300,12 @@ export default function App() {
                     <div className="flex items-center justify-between px-1">
                       <span className="text-xs font-bold uppercase tracking-widest text-black/40">Retouched</span>
                       {retouchedImage && (
-                        <div className="flex gap-4">
-                          <button
-                            onClick={handleRetouch}
-                            className="flex items-center gap-1 text-xs font-medium text-black hover:underline"
-                          >
-                            재생성
-                          </button>
-                          <button
-                            onClick={downloadImage}
-                            className="flex items-center gap-1 text-xs font-medium text-black hover:underline"
-                          >
-                            <Download size={12} />
-                            다운로드
-                          </button>
-                        </div>
+                        <button
+                          onClick={handleRetouch}
+                          className="flex items-center gap-1 text-xs font-medium text-black hover:underline"
+                        >
+                          재생성
+                        </button>
                       )}
                     </div>
                     <div className="aspect-square bg-white rounded-2xl overflow-hidden shadow-sm border border-black/5 flex items-center justify-center relative">
@@ -469,19 +460,21 @@ export default function App() {
                 {isProcessing ? '처리 중...' : '이미지 생성'}
               </button>
               
+              {retouchedImage && (
+                <button
+                  onClick={downloadImage}
+                  className="w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 bg-white text-black border border-black/10 hover:bg-black/5 active:scale-[0.98] transition-all"
+                >
+                  <Download size={20} />
+                  이미지 다운로드
+                </button>
+              )}
+
               {!hasApiKey && !customApiKey && originalImage && (
                 <p className="text-[10px] text-center text-red-500 font-medium">
                   보정을 시작하려면 먼저 API 키를 입력하거나 선택하세요.
                 </p>
               )}
-            </div>
-
-            <div className="bg-black/5 p-6 rounded-3xl border border-black/10">
-              <h3 className="text-sm font-bold text-black mb-2">전문가의 팁</h3>
-              <p className="text-xs text-black/60 leading-relaxed">
-                로고를 교체하려면 '로고 추가' 버튼을 눌러 새 로고 이미지를 업로드하세요. 
-                주황색 부품들은 자동으로 녹색으로 변경됩니다.
-              </p>
             </div>
           </aside>
         </div>
