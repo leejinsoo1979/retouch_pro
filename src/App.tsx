@@ -3,18 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useRef, useEffect, ChangeEvent, DragEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, ChangeEvent, DragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { 
-  Upload, 
-  Image as ImageIcon, 
-  Sparkles, 
-  Download, 
-  Loader2, 
-  Settings2, 
+import {
+  Upload,
+  Image as ImageIcon,
+  Sparkles,
+  Download,
+  Loader2,
+  Settings2,
   CheckCircle2,
   AlertCircle,
-  Key
+  Key,
+  Pencil,
+  Eraser,
+  X,
+  Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -53,8 +57,14 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<string>(MODELS[0].id);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editPrompt, setEditPrompt] = useState('');
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [brushSize, setBrushSize] = useState(20);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const markCanvasRef = useRef<HTMLCanvasElement>(null);
+  const markContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     checkApiKey();
@@ -196,6 +206,139 @@ export default function App() {
     }
   };
 
+  // Edit mode: canvas setup
+  const initMarkCanvas = useCallback(() => {
+    const canvas = markCanvasRef.current;
+    const container = markContainerRef.current;
+    if (!canvas || !container) return;
+    canvas.width = container.offsetWidth;
+    canvas.height = container.offsetHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isEditMode) {
+      setTimeout(initMarkCanvas, 50);
+    }
+  }, [isEditMode, initMarkCanvas]);
+
+  const getCanvasPos = (e: ReactMouseEvent<HTMLCanvasElement>) => {
+    const canvas = markCanvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  };
+
+  const startDraw = (e: ReactMouseEvent<HTMLCanvasElement>) => {
+    setIsDrawing(true);
+    const ctx = markCanvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    const pos = getCanvasPos(e);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+  };
+
+  const draw = (e: ReactMouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const ctx = markCanvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    const pos = getCanvasPos(e);
+    ctx.lineWidth = brushSize;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  };
+
+  const stopDraw = () => setIsDrawing(false);
+
+  const clearMark = () => {
+    const canvas = markCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const getMarkedImage = (): string | null => {
+    const canvas = markCanvasRef.current;
+    const container = markContainerRef.current;
+    if (!canvas || !container || !retouchedImage) return null;
+
+    const merged = document.createElement('canvas');
+    merged.width = canvas.width;
+    merged.height = canvas.height;
+    const ctx = merged.getContext('2d')!;
+
+    const img = new Image();
+    img.src = retouchedImage;
+    ctx.drawImage(img, 0, 0, merged.width, merged.height);
+    ctx.drawImage(canvas, 0, 0);
+
+    return merged.toDataURL('image/png');
+  };
+
+  const handleEditRetouch = async () => {
+    if (!retouchedImage || !editPrompt.trim() || (!hasApiKey && !customApiKey)) return;
+
+    const markedImage = getMarkedImage();
+
+    setIsProcessing(true);
+    setError(null);
+    setIsEditMode(false);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: customApiKey || process.env.API_KEY || '' });
+      const parts: any[] = [];
+
+      parts.push({ text: "보정된 제품 이미지 (빨간색으로 마킹된 부분이 수정 요청 영역입니다):" });
+      const imgSrc = markedImage || retouchedImage;
+      const base64 = imgSrc.split(',')[1];
+      const mime = imgSrc.split(';')[0].split(':')[1];
+      parts.push({ inlineData: { data: base64, mimeType: mime } });
+
+      parts.push({ text: `추가 보정 요청: ${editPrompt.trim()}
+
+위 이미지에서 빨간색으로 마킹된 영역을 중심으로 요청된 수정사항을 적용하세요.
+마킹되지 않은 영역은 절대 변경하지 마세요. 제품의 전체적인 품질과 스타일을 유지하면서 마킹된 부분만 수정하세요.` });
+
+      const response = await ai.models.generateContent({
+        model: selectedModel,
+        contents: { parts },
+        config: {
+          imageConfig: {
+            imageSize: imageSize,
+            aspectRatio: "1:1"
+          }
+        }
+      });
+
+      let foundImage = false;
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          setRetouchedImage(`data:image/png;base64,${part.inlineData.data}`);
+          foundImage = true;
+          break;
+        }
+      }
+
+      if (!foundImage) {
+        throw new Error("수정된 이미지를 생성하지 못했습니다. 다시 시도해주세요.");
+      }
+    } catch (err: any) {
+      console.error("Edit retouch error:", err);
+      setError(err.message || "추가 보정 중 오류가 발생했습니다.");
+    } finally {
+      setIsProcessing(false);
+      setEditPrompt('');
+    }
+  };
+
   const downloadImage = () => {
     if (!retouchedImage) return;
     const link = document.createElement('a');
@@ -308,14 +451,73 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    <div className="aspect-square bg-white rounded-2xl overflow-hidden shadow-sm border border-black/5 flex items-center justify-center relative">
+                    <div ref={markContainerRef} className="aspect-square bg-white rounded-2xl overflow-hidden shadow-sm border border-black/5 flex items-center justify-center relative">
                       {retouchedImage ? (
-                        <img 
-                          src={retouchedImage} 
-                          alt="Retouched" 
-                          className="w-full h-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
+                        <>
+                          <img
+                            src={retouchedImage}
+                            alt="Retouched"
+                            className="w-full h-full object-contain"
+                            referrerPolicy="no-referrer"
+                          />
+                          {isEditMode && (
+                            <>
+                              <canvas
+                                ref={markCanvasRef}
+                                className="absolute inset-0 w-full h-full cursor-crosshair"
+                                onMouseDown={startDraw}
+                                onMouseMove={draw}
+                                onMouseUp={stopDraw}
+                                onMouseLeave={stopDraw}
+                              />
+                              {/* Mark toolbar */}
+                              <div className="absolute top-3 left-3 flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-xl px-3 py-2 shadow-md border border-black/10">
+                                <input
+                                  type="range"
+                                  min="5"
+                                  max="50"
+                                  value={brushSize}
+                                  onChange={(e) => setBrushSize(Number(e.target.value))}
+                                  className="w-20 accent-red-500"
+                                />
+                                <span className="text-[10px] text-black/40 w-6">{brushSize}</span>
+                                <button onClick={clearMark} className="p-1 hover:bg-black/5 rounded-lg" title="마킹 지우기">
+                                  <Eraser size={14} />
+                                </button>
+                                <button onClick={() => setIsEditMode(false)} className="p-1 hover:bg-black/5 rounded-lg" title="취소">
+                                  <X size={14} />
+                                </button>
+                              </div>
+                              {/* Prompt input */}
+                              <div className="absolute bottom-3 left-3 right-3 flex gap-2">
+                                <input
+                                  type="text"
+                                  value={editPrompt}
+                                  onChange={(e) => setEditPrompt(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleEditRetouch()}
+                                  placeholder="수정할 내용을 입력하세요"
+                                  className="flex-1 px-4 py-2 rounded-xl bg-white/90 backdrop-blur-sm border border-black/10 text-sm outline-none shadow-md"
+                                />
+                                <button
+                                  onClick={handleEditRetouch}
+                                  disabled={!editPrompt.trim()}
+                                  className="px-4 py-2 bg-black text-white rounded-xl text-sm font-medium hover:bg-black/80 disabled:opacity-30 shadow-md"
+                                >
+                                  <Send size={14} />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                          {!isEditMode && (
+                            <button
+                              onClick={() => setIsEditMode(true)}
+                              className="absolute bottom-3 right-3 flex items-center gap-1.5 px-3 py-2 bg-white/90 backdrop-blur-sm text-black text-xs font-medium rounded-xl shadow-md border border-black/10 hover:bg-white transition-colors"
+                            >
+                              <Pencil size={12} />
+                              추가 보정
+                            </button>
+                          )}
+                        </>
                       ) : isProcessing ? (
                         <div className="flex flex-col items-center gap-4">
                           <Loader2 className="w-10 h-10 text-black animate-spin" />
