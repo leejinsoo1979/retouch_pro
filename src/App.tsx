@@ -30,14 +30,27 @@ declare global {
 
 type ImageSize = '1K' | '2K' | '4K';
 
+type ModelOption = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+const MODELS: ModelOption[] = [
+  { id: 'gemini-3-pro-image-preview', name: 'Nano Banana Pro', description: '고품질 전문 보정' },
+  { id: 'gemini-3.1-flash-image-preview', name: 'Nano Banana 2', description: '빠른 속도, 대량 작업' },
+  { id: 'gemini-2.5-flash-image', name: 'Nano Banana', description: '초고속, 저지연' },
+];
+
 export default function App() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [logoText, setLogoText] = useState<string>('');
-  const [customApiKey, setCustomApiKey] = useState<string>('');
+  const [customApiKey, setCustomApiKey] = useState<string>(() => localStorage.getItem('gemini-api-key') || '');
   const [retouchedImage, setRetouchedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [imageSize, setImageSize] = useState<ImageSize>('1K');
+  const [selectedModel, setSelectedModel] = useState<string>(MODELS[0].id);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,7 +126,7 @@ export default function App() {
 
     try {
       const ai = new GoogleGenAI({ apiKey: customApiKey || process.env.API_KEY || '' });
-      const model = 'gemini-3-pro-image-preview';
+      const model = selectedModel;
 
       // Prepare image parts
       const parts: any[] = [];
@@ -370,7 +383,7 @@ export default function App() {
                     <input 
                       type="password"
                       value={customApiKey}
-                      onChange={(e) => setCustomApiKey(e.target.value)}
+                      onChange={(e) => { setCustomApiKey(e.target.value); localStorage.setItem('gemini-api-key', e.target.value); }}
                       placeholder="Gemini API 키를 입력하세요"
                       className="w-full px-4 py-2 pl-9 rounded-xl bg-white border border-black/20 focus:border-black focus:ring-2 focus:ring-black/10 transition-all text-sm outline-none"
                     />
@@ -378,6 +391,29 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {/* Model Selection */}
+              {customApiKey && (
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-widest text-black/40">모델 선택</label>
+                  <div className="space-y-2">
+                    {MODELS.map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => setSelectedModel(model.id)}
+                        className={`w-full text-left px-4 py-3 rounded-xl transition-all ${
+                          selectedModel === model.id
+                            ? 'bg-black text-white'
+                            : 'bg-black/5 text-black/60 hover:bg-black/10'
+                        }`}
+                      >
+                        <p className="text-sm font-semibold">{model.name}</p>
+                        <p className={`text-[11px] ${selectedModel === model.id ? 'text-white/60' : 'text-black/40'}`}>{model.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Size Selection */}
               <div className="space-y-3">
